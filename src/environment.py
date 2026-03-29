@@ -1,21 +1,42 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, List, Set, Tuple
+from typing import Dict, Iterable, List, Set, Tuple
 
 
 Position = Tuple[int, int]
+Action = str
 
-'''
-This file defines the grid-based maze environment used in the project.
-It provides the basic representation of the maze, including walls, the
-start state, the goal state, and valid movements between cells.
-'''
+ACTIONS: Tuple[Action, ...] = ("up", "down", "left", "right")
+ACTION_DELTAS: Dict[Action, Position] = {
+    "up": (-1, 0),
+    "down": (1, 0),
+    "left": (0, -1),
+    "right": (0, 1),
+}
+
+
+"""
+environment.py
+
+This module defines the grid-based maze environment used in the project.
+It stores the maze dimensions, start state, goal state, and wall locations.
+
+The module provides helper methods for both classical search and
+reinforcement learning. Search algorithms use neighbor expansion,
+while Q-learning can use action selection, state transitions, rewards,
+and terminal-state checks in the same environment.
+"""
+
 
 @dataclass(frozen=True)
 class GridWorld:
     """
-    a grid based in a maze environment.
+    A grid-based maze environment.
+
+    The environment stores the size of the grid, the start and goal
+    positions, and the set of wall cells. It supports both search-based
+    path finding and reinforcement learning interaction.
     """
 
     rows: int
@@ -25,19 +46,31 @@ class GridWorld:
     walls: Set[Position]
 
     def in_bounds(self, pos: Position) -> bool:
-        """chekc if the position is within the maze"""
+        """
+        Check whether a position lies within the grid boundaries.
+        """
         r, c = pos
         return 0 <= r < self.rows and 0 <= c < self.cols
 
     def passable(self, pos: Position) -> bool:
-        """check whether a position is not blocked"""
+        """
+        Check whether a position is not blocked by a wall.
+        """
         return pos not in self.walls
+
+    def is_valid_state(self, pos: Position) -> bool:
+        """
+        Check whether a state is both inside the grid and passable.
+        """
+        return self.in_bounds(pos) and self.passable(pos)
 
     def neighbors(self, pos: Position) -> List[Position]:
         """
-        return all valid neighboring positions for a given cell.
-        movement is restricted to the four directions. neighbor is valid only if
-        it is inside the gird and not blocked
+        Return all valid neighboring positions for a given cell.
+
+        Movement is restricted to the four cardinal directions.
+        A neighbor is valid only if it is inside the grid and not blocked
+        by a wall.
         """
         r, c = pos
         candidates = [
@@ -46,7 +79,70 @@ class GridWorld:
             (r, c - 1),
             (r, c + 1),
         ]
-        return [p for p in candidates if self.in_bounds(p) and self.passable(p)]
+        return [p for p in candidates if self.is_valid_state(p)]
+
+    def get_actions(self, state: Position) -> List[Action]:
+        """
+        Return the available action labels.
+
+        In this project, the action space is fixed to four directions.
+        Invalid moves are handled by the transition function.
+        """
+        return list(ACTIONS)
+
+    def next_position(self, state: Position, action: Action) -> Position:
+        """
+        Compute the next state after applying an action.
+
+        If the action would move the agent out of bounds or into a wall,
+        the agent stays in the current state.
+        """
+        if action not in ACTION_DELTAS:
+            raise ValueError(f"Unsupported action '{action}'.")
+
+        dr, dc = ACTION_DELTAS[action]
+        candidate = (state[0] + dr, state[1] + dc)
+
+        if self.is_valid_state(candidate):
+            return candidate
+        return state
+
+    def is_terminal(self, state: Position) -> bool:
+        """
+        Check whether the given state is the goal state.
+        """
+        return state == self.goal
+
+    def get_reward(
+        self, state: Position, action: Action, next_state: Position
+    ) -> float:
+        """
+        Return the reward for a transition.
+
+        Reward design for phase 2:
+        - reaching the goal: +10
+        - invalid move that keeps the agent in place: -2
+        - normal step: -1
+        """
+        if next_state == self.goal:
+            return 10.0
+        if next_state == state:
+            return -2.0
+        return -1.0
+
+    def step(self, state: Position, action: Action) -> Tuple[Position, float, bool]:
+        """
+        Execute one environment step for reinforcement learning.
+
+        Returns:
+            next_state: the resulting state after the action
+            reward: reward for the transition
+            done: whether the next state is terminal
+        """
+        next_state = self.next_position(state, action)
+        reward = self.get_reward(state, action, next_state)
+        done = self.is_terminal(next_state)
+        return next_state, reward, done
 
     def validate(self) -> None:
         """
@@ -94,6 +190,8 @@ class GridWorld:
 
         start = None
         goal = None
+        start_count = 0
+        goal_count = 0
         walls: Set[Position] = set()
 
         for r in range(rows):
@@ -101,8 +199,10 @@ class GridWorld:
                 cell = grid[r][c]
                 if cell == "S":
                     start = (r, c)
+                    start_count += 1
                 elif cell == "G":
                     goal = (r, c)
+                    goal_count += 1
                 elif cell == "#":
                     walls.add((r, c))
                 elif cell == ".":
@@ -112,8 +212,8 @@ class GridWorld:
                         f"Unsupported maze symbol '{cell}'. Use S, G, #, or ."
                     )
 
-        if start is None or goal is None:
-            raise ValueError("Maze must contain both one start cell 'S' and one goal cell 'G'.")
+        if start_count != 1 or goal_count != 1:
+            raise ValueError("Maze must contain exactly one S and one G.")
 
         world = cls(rows=rows, cols=cols, start=start, goal=goal, walls=walls)
         world.validate()
@@ -122,10 +222,14 @@ class GridWorld:
     def render(self, path: List[Position] | None = None) -> str:
         """
         Return a string representation of the maze.
+
+        If a path is provided, cells on the path are marked with '*'
+        while preserving the start and goal symbols.
         """
         path = path or []
         path_set = set(path)
         output: List[str] = []
+
         for r in range(self.rows):
             row_chars: List[str] = []
             for c in range(self.cols):
@@ -141,4 +245,5 @@ class GridWorld:
                 else:
                     row_chars.append(".")
             output.append("".join(row_chars))
+
         return "\n".join(output)

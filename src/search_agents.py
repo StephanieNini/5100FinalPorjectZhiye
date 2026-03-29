@@ -51,7 +51,6 @@ def reconstruct_path(
     path.reverse()
     return path
 
-
 def manhattan(a: Position, b: Position) -> int:
     """
     Compute the Manhattan distance between two positions.
@@ -103,6 +102,7 @@ def bfs_search(world: GridWorld) -> SearchResult:
                 frontier.append(neighbor)
 
     runtime_ms = (time.perf_counter() - start_time) * 1000
+
     return SearchResult(
         algorithm="BFS",
         path=[],
